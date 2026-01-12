@@ -1,4 +1,4 @@
-name: Build Portable macOS Python
+name: Build Portable Python for M-Series Macs
 
 on:
   push:
@@ -7,51 +7,40 @@ on:
 
 jobs:
   build:
-    name: Build for ${{ matrix.arch }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - arch: "arm64"
-            os: "macos-14" # Apple Silicon
-            release_name: "aarch64-apple-darwin"
-          - arch: "x86_64"
-            os: "macos-13" # Intel
-            release_name: "x86_64-apple-darwin"
+    # 'macos-latest' is now the Apple Silicon runner (M1-M5 compatible)
+    runs-on: macos-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download Standalone Python
+      - name: Download Portable Python (ARM64 Native)
         run: |
-          # We download a pre-compiled, relocatable Python 3.10
-          URL="https://github.com/indygreg/python-build-standalone/releases/download/20240107/cpython-3.10.13+20240107-${{ matrix.release_name }}-install_only.tar.gz"
-          curl -L $URL -o python_standalone.tar.gz
-          tar -xzf python_standalone.tar.gz
-          # This creates a 'python' folder
+          # Targeting the latest stable 3.10 release for Apple Silicon
+          URL="https://github.com/astral-sh/python-build-standalone/releases/download/20251009/cpython-3.10.19+20251009-aarch64-apple-darwin-install_only.tar.gz"
+          curl -L $URL -o python_portable.tar.gz
+          tar -xzf python_portable.tar.gz
+          mv python python_m_series
 
       - name: Install dependencies
         run: |
-          # Use the local python to install your requirements
-          ./python/bin/python3 -m pip install --upgrade pip
+          ./python_m_series/bin/python3 -m pip install --upgrade pip
           if [ -f "requirements.txt" ]; then
-            ./python/bin/python3 -m pip install -r requirements.txt
+            ./python_m_series/bin/python3 -m pip install -r requirements.txt
           fi
 
-      - name: Make Environment Relocatable
+      - name: Fix Relocatability
         run: |
-          # This fixes the "Shebang" lines in bin/ scripts
-          # It changes #!/Users/runner/... to #!/usr/bin/env python3
-          # This allows the folder to be placed anywhere on a new Mac
-          grep -lR "/Users/runner" ./python/bin | xargs sed -i '' '1s|.*|#!/usr/bin/env python3|' || true
+          # Ensures 'pip' and other scripts work even if you rename the folder
+          # Replaces the internal runner path with the generic /usr/bin/env python3
+          grep -lR "/Users/runner" ./python_m_series/bin | xargs sed -i '' '1s|.*|#!/usr/bin/env python3|' || true
 
-      - name: Package Portable Folder
+      - name: Package Folder
         run: |
-          tar -czf python-3.10-macos-${{ matrix.arch }}.tar.gz python
+          tar -czf python-portable-apple-silicon.tar.gz python_m_series
 
-      - name: Upload Artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: python-portable-${{ matrix.arch }}
-          path: python-3.10-macos-${{ matrix.arch }}.tar.gz
+          name: python-portable-apple-silicon
+          path: python-portable-apple-silicon.tar.gz
