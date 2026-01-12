@@ -1,4 +1,4 @@
-name: Build Portable Python for M-Series Macs
+name: Build Portable Python (Apple Silicon M-Series)
 
 on:
   push:
@@ -7,20 +7,30 @@ on:
 
 jobs:
   build:
-    # 'macos-latest' is now the Apple Silicon runner (M1-M5 compatible)
-    runs-on: macos-latest
+    runs-on: macos-latest # This is an M-series runner
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download Portable Python (ARM64 Native)
+      - name: Download Portable Python (Native ARM64)
         run: |
-          # Targeting the latest stable 3.10 release for Apple Silicon
-          URL="https://github.com/astral-sh/python-build-standalone/releases/download/20251009/cpython-3.10.19+20251009-aarch64-apple-darwin-install_only.tar.gz"
-          curl -L $URL -o python_portable.tar.gz
-          tar -xzf python_portable.tar.gz
-          mv python python_m_series
+          # Updated URL for 2026 stable release
+          # Using -L to follow redirects and -f to fail if the link is broken
+          URL="https://github.com/astral-sh/python-build-standalone/releases/download/20251217/cpython-3.10.19+20251217-aarch64-apple-darwin-install_only.tar.gz"
+          
+          echo "Downloading Python from $URL..."
+          curl -L -f $URL -o python_portable.tar.gz
+          
+          # Check if the file is actually a gzip before extracting
+          if file python_portable.tar.gz | grep -q "gzip compressed data"; then
+            tar -xzf python_portable.tar.gz
+            mv python python_m_series
+          else
+            echo "Error: Downloaded file is not a valid archive. Check the URL."
+            cat python_portable.tar.gz # This will show the error message (e.g., Not Found)
+            exit 1
+          fi
 
       - name: Install dependencies
         run: |
@@ -29,18 +39,17 @@ jobs:
             ./python_m_series/bin/python3 -m pip install -r requirements.txt
           fi
 
-      - name: Fix Relocatability
+      - name: Fix Relocatability (Crucial)
         run: |
-          # Ensures 'pip' and other scripts work even if you rename the folder
-          # Replaces the internal runner path with the generic /usr/bin/env python3
+          # Fixes shebangs in bin/ so the folder can be moved
           grep -lR "/Users/runner" ./python_m_series/bin | xargs sed -i '' '1s|.*|#!/usr/bin/env python3|' || true
 
-      - name: Package Folder
+      - name: Package for S3
         run: |
-          tar -czf python-portable-apple-silicon.tar.gz python_m_series
+          tar -czf python-portable-m-series.tar.gz python_m_series
 
-      - name: Upload
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: python-portable-apple-silicon
-          path: python-portable-apple-silicon.tar.gz
+          name: python-m-series
+          path: python-portable-m-series.tar.gz
