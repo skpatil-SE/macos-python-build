@@ -88,7 +88,6 @@ psutil>=5.9.0
 plyer==2.1.0
 cryptography
 opencv-python==4.11.0.86
-pywin32==311
 protobuf>=3.19.6,<5.0.0
 grpcio<=1.62.2
 grpcio-tools<=1.62.2
