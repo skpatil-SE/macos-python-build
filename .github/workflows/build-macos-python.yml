@@ -1,31 +1,57 @@
-name: Build macOS Python 3.10
+name: Build Portable macOS Python
 
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: macos-14
+    name: Build for ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - arch: "arm64"
+            os: "macos-14" # Apple Silicon
+            release_name: "aarch64-apple-darwin"
+          - arch: "x86_64"
+            os: "macos-13" # Intel
+            release_name: "x86_64-apple-darwin"
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: Create venv
+      - name: Download Standalone Python
         run: |
-          python -m venv python
-          source python/bin/activate
-          pip install --upgrade pip
-          pip install -r requirements.txt
+          # We download a pre-compiled, relocatable Python 3.10
+          URL="https://github.com/indygreg/python-build-standalone/releases/download/20240107/cpython-3.10.13+20240107-${{ matrix.release_name }}-install_only.tar.gz"
+          curl -L $URL -o python_standalone.tar.gz
+          tar -xzf python_standalone.tar.gz
+          # This creates a 'python' folder
 
-      - name: Package env
-        run: tar -czf python-macos.tar.gz python
+      - name: Install dependencies
+        run: |
+          # Use the local python to install your requirements
+          ./python/bin/python3 -m pip install --upgrade pip
+          if [ -f "requirements.txt" ]; then
+            ./python/bin/python3 -m pip install -r requirements.txt
+          fi
 
-      - uses: actions/upload-artifact@v4
+      - name: Make Environment Relocatable
+        run: |
+          # This fixes the "Shebang" lines in bin/ scripts
+          # It changes #!/Users/runner/... to #!/usr/bin/env python3
+          # This allows the folder to be placed anywhere on a new Mac
+          grep -lR "/Users/runner" ./python/bin | xargs sed -i '' '1s|.*|#!/usr/bin/env python3|' || true
+
+      - name: Package Portable Folder
+        run: |
+          tar -czf python-3.10-macos-${{ matrix.arch }}.tar.gz python
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: python-macos
-          path: python-macos.tar.gz
+          name: python-portable-${{ matrix.arch }}
+          path: python-3.10-macos-${{ matrix.arch }}.tar.gz
