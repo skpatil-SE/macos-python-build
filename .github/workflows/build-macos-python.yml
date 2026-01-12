@@ -1,0 +1,36 @@
+name: Build macOS Python 3.10 Environment
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-13   # Intel Mac (use macos-14 for Apple Silicon)
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Create virtual environment
+        run: |
+          python -m venv python
+          source python/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Archive Python environment
+        run: |
+          tar -czf python-macos.tar.gz python
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-macos
+          path: python-macos.tar.gz
+
