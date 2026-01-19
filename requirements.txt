@@ -79,11 +79,8 @@ diffusers
 paho-mqtt==2.1.0
 websockets==12.0
 awsiotsdk==1.21.0
-PyGetWindow
-pynvml
 screeninfo
 getmac
-wmi
 psutil>=5.9.0
 plyer==2.1.0
 cryptography
