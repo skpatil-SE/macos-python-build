@@ -7,46 +7,98 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest # This is an M-series runner
+    runs-on: macos-14   # Apple Silicon guaranteed
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download Portable Python (Native ARM64)
+      - name: Download & Extract Python (ARM64)
         run: |
-          # Updated URL for 2026 stable release
-          # Using -L to follow redirects and -f to fail if the link is broken
+          set -e
           URL="https://github.com/astral-sh/python-build-standalone/releases/download/20251217/cpython-3.10.19+20251217-aarch64-apple-darwin-install_only.tar.gz"
-          
-          echo "Downloading Python from $URL..."
-          curl -L -f $URL -o python_portable.tar.gz
-          
-          # Check if the file is actually a gzip before extracting
-          if file python_portable.tar.gz | grep -q "gzip compressed data"; then
-            tar -xzf python_portable.tar.gz
-            mv python python_m_series
+          curl -L -f "$URL" -o python_portable.tar.gz
+          tar -xzf python_portable.tar.gz
+          mv python python_m_series
+
+      - name: Clean Requirements for macOS
+        run: |
+          set -e
+          if [ -f requirements.txt ]; then
+            sed -E '/^(wmi|PyGetWindow|pynvml)/d' requirements.txt > requirements_mac.txt
           else
-            echo "Error: Downloaded file is not a valid archive. Check the URL."
-            cat python_portable.tar.gz # This will show the error message (e.g., Not Found)
-            exit 1
+            touch requirements_mac.txt
           fi
 
-      - name: Install dependencies
+      - name: Install Python Dependencies
         run: |
-          ./python_m_series/bin/python3 -m pip install --upgrade pip
-          if [ -f "requirements.txt" ]; then
-            ./python_m_series/bin/python3 -m pip install -r requirements.txt
+          set -e
+          export PIP_DISABLE_PIP_VERSION_CHECK=1
+          export PIP_NO_CACHE_DIR=1
+          export ARCHFLAGS="-arch arm64"
+
+          ./python_m_series/bin/python3 -m ensurepip
+          ./python_m_series/bin/python3 -m pip install --upgrade pip setuptools wheel
+
+          # Install custom hosted wheels
+          ./python_m_series/bin/python3 -m pip install \
+            "https://cdn.shibenchsmart.com/system-dependencies/mac/parler-tts/parler_tts-0.2.2-py3-none-any.whl" \
+            "https://cdn.shibenchsmart.com/system-dependencies/mac/suno-ai/bark/suno_bark-0.0.1a0-py3-none-any.whl"
+
+          # Install remaining deps
+          if [ -s requirements_mac.txt ]; then
+            ./python_m_series/bin/python3 -m pip install --prefer-binary -r requirements_mac.txt
           fi
 
-      - name: Fix Relocatability (Crucial)
+      - name: Gatekeeper Cleanup
         run: |
-          # Fixes shebangs in bin/ so the folder can be moved
-          grep -lR "/Users/runner" ./python_m_series/bin | xargs sed -i '' '1s|.*|#!/usr/bin/env python3|' || true
+          # Remove quarantine flags early
+          xattr -cr ./python_m_series || true
 
-      - name: Package for S3
+      - name: Ad-hoc Sign Mach-O Binaries (M1–M3 Safe)
         run: |
-          tar -czf python-portable-m-series.tar.gz python_m_series
+          find ./python_m_series -type f -exec file {} \; |
+            grep "Mach-O" |
+            cut -d: -f1 |
+            while read f; do
+              codesign --force --deep --sign - "$f" || true
+            done
+
+      - name: Fix Relocatability (Scripts Only)
+        run: |
+          # ONLY rewrite shebangs for text executables
+          find ./python_m_series/bin -type f -perm +111 -print0 |
+          while IFS= read -r -d '' f; do
+            if head -c 2 "$f" | grep -q '^#!'; then
+              sed -i '' '1s|^#!.*|#!/usr/bin/env python3|' "$f"
+            fi
+          done
+
+      - name: Strip Debug Symbols (Optional Size Reduction)
+        run: |
+          find ./python_m_series -type f -exec strip -x {} + || true
+
+      - name: Runtime Verification
+        run: |
+          ./python_m_series/bin/python3 - <<EOF
+          import platform, sys
+          print("Python:", sys.version)
+          print("Arch:", platform.machine())
+          try:
+              import torch
+              print("Torch MPS:", torch.backends.mps.is_available())
+          except Exception as e:
+              print("Torch check skipped:", e)
+          EOF
+
+      - name: Final Architecture Check
+        run: |
+          file ./python_m_series/bin/python3
+          ./python_m_series/bin/python3 --version
+
+      - name: Package Portable Python
+        run: |
+          tar --no-xattrs -czf python-portable-m-series.tar.gz python_m_series
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
